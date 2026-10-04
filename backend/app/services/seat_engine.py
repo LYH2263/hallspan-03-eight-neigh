@@ -1,4 +1,4 @@
-"""Exam seating: min Manhattan distance; same paper_id cannot be 4-neighbor adjacent."""
+"""Exam seating: min Manhattan distance; same paper_id cannot be 8-neighbor adjacent (diagonals included)."""
 from __future__ import annotations
 from dataclasses import asdict, dataclass
 
@@ -21,16 +21,15 @@ class Violation:
 def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-def neighbors4(r: int, c: int, rows: int, cols: int) -> list[tuple[int, int]]:
-    out = []
-    for dr, dc in ((0, 1), (0, -1), (1, 0), (-1, 0)):
-        nr, nc = r + dr, c + dc
-        if 0 <= nr < rows and 0 <= nc < cols:
-            out.append((nr, nc))
-    return out
+def is_eight_adjacent(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    """八邻（含对角）：行差、列差均 <= 1 且不是同一座位。排座图、违规列表共用此口径。"""
+    return a != b and abs(a[0] - b[0]) <= 1 and abs(a[1] - b[1]) <= 1
 
 def place_candidates(rows: int, cols: int, min_dist: int, candidates: list[dict]) -> tuple[list[SeatAssign], list[dict]]:
-    """Greedy: try seats row-major; accept if manhattan >= min_dist to all placed AND no same paper 4-neigh."""
+    """Greedy: try seats row-major. 一个座位必须【同时】满足以下两条才可坐，只满足其中一条仍算失败：
+    1. 与所有已坐者的曼哈顿距离 >= min_dist；
+    2. 八邻（行差列差均 <= 1，含对角）内没有同试卷套考生。
+    """
     occupied: dict[tuple[int, int], SeatAssign] = {}
     unplaced: list[dict] = []
     for cand in candidates:
@@ -44,14 +43,7 @@ def place_candidates(rows: int, cols: int, min_dist: int, candidates: list[dict]
                     if manhattan((r, c), pos) < min_dist:
                         ok = False
                         break
-                    if other.paper_id == cand["paper_id"] and (r, c) in neighbors4(pos[0], pos[1], rows, cols):
-                        ok = False
-                        break
-                if not ok:
-                    continue
-                # also check 4-neigh same paper against current neighbors
-                for nr, nc in neighbors4(r, c, rows, cols):
-                    if (nr, nc) in occupied and occupied[(nr, nc)].paper_id == cand["paper_id"]:
+                    if other.paper_id == cand["paper_id"] and is_eight_adjacent((r, c), pos):
                         ok = False
                         break
                 if not ok:
@@ -67,17 +59,18 @@ def place_candidates(rows: int, cols: int, min_dist: int, candidates: list[dict]
     return list(occupied.values()), unplaced
 
 def find_violations(rows: int, cols: int, min_dist: int, assigns: list[SeatAssign]) -> list[Violation]:
+    """与 place_candidates 同一邻接口径：距离不足、同试卷套八邻（含对角）相邻。
+    每对考生至多产生一条同套相邻记录（八邻一句），不再另挂四邻。"""
     viols: list[Violation] = []
-    by_pos = {(a.row, a.col): a for a in assigns}
     for i, a in enumerate(assigns):
         for b in assigns[i + 1:]:
             d = manhattan((a.row, a.col), (b.row, b.col))
             if d < min_dist:
                 viols.append(Violation("distance", a.candidate_id, b.candidate_id,
                                        f"曼哈顿距离 {d} < 最小要求 {min_dist}"))
-            if a.paper_id == b.paper_id and (b.row, b.col) in neighbors4(a.row, a.col, rows, cols):
+            if a.paper_id == b.paper_id and is_eight_adjacent((a.row, a.col), (b.row, b.col)):
                 viols.append(Violation("same_paper_adjacent", a.candidate_id, b.candidate_id,
-                                       f"同试卷套 {a.paper_id} 四邻相邻"))
+                                       f"同试卷套 {a.paper_id} 八邻相邻（含对角）"))
     return viols
 
 def plan_to_dict(assigns: list[SeatAssign], unplaced: list[dict], viols: list[Violation], rows: int, cols: int) -> dict:
