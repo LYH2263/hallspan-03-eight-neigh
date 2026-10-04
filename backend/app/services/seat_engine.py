@@ -1,4 +1,4 @@
-"""Exam seating: min Manhattan distance; same paper_id cannot be 4-neighbor adjacent."""
+"""Exam seating: min Manhattan distance; same paper set cannot sit in 8-neighborhood (diagonals included)."""
 from __future__ import annotations
 from dataclasses import asdict, dataclass
 
@@ -21,16 +21,33 @@ class Violation:
 def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-def neighbors4(r: int, c: int, rows: int, cols: int) -> list[tuple[int, int]]:
+def chebyshev(a: tuple[int, int], b: tuple[int, int]) -> int:
+    """8-neighborhood metric: <= 1 means row diff and col diff are both <= 1 (diagonals included)."""
+    return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+def neighbors8(r: int, c: int, rows: int, cols: int) -> list[tuple[int, int]]:
     out = []
-    for dr, dc in ((0, 1), (0, -1), (1, 0), (-1, 0)):
-        nr, nc = r + dr, c + dc
-        if 0 <= nr < rows and 0 <= nc < cols:
-            out.append((nr, nc))
+    for dr in (-1, 0, 1):
+        for dc in (-1, 0, 1):
+            if dr == 0 and dc == 0:
+                continue
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < rows and 0 <= nc < cols:
+                out.append((nr, nc))
     return out
 
+def seat_ok(r: int, c: int, paper_id: int, min_dist: int, occupied: dict[tuple[int, int], SeatAssign]) -> bool:
+    """A seat is acceptable only if BOTH rules hold; passing just one still fails:
+    manhattan >= min_dist to every placed seat, and no same paper set within 8-neighborhood."""
+    for pos, other in occupied.items():
+        if manhattan((r, c), pos) < min_dist:
+            return False
+        if other.paper_id == paper_id and chebyshev((r, c), pos) <= 1:
+            return False
+    return True
+
 def place_candidates(rows: int, cols: int, min_dist: int, candidates: list[dict]) -> tuple[list[SeatAssign], list[dict]]:
-    """Greedy: try seats row-major; accept if manhattan >= min_dist to all placed AND no same paper 4-neigh."""
+    """Greedy: try seats row-major; accept if manhattan >= min_dist to all placed AND no same-set 8-neigh."""
     occupied: dict[tuple[int, int], SeatAssign] = {}
     unplaced: list[dict] = []
     for cand in candidates:
@@ -39,22 +56,7 @@ def place_candidates(rows: int, cols: int, min_dist: int, candidates: list[dict]
             for c in range(cols):
                 if (r, c) in occupied:
                     continue
-                ok = True
-                for pos, other in occupied.items():
-                    if manhattan((r, c), pos) < min_dist:
-                        ok = False
-                        break
-                    if other.paper_id == cand["paper_id"] and (r, c) in neighbors4(pos[0], pos[1], rows, cols):
-                        ok = False
-                        break
-                if not ok:
-                    continue
-                # also check 4-neigh same paper against current neighbors
-                for nr, nc in neighbors4(r, c, rows, cols):
-                    if (nr, nc) in occupied and occupied[(nr, nc)].paper_id == cand["paper_id"]:
-                        ok = False
-                        break
-                if not ok:
+                if not seat_ok(r, c, cand["paper_id"], min_dist, occupied):
                     continue
                 assign = SeatAssign(cand["id"], cand["name"], cand["ticket_no"], cand["paper_id"], r, c)
                 occupied[(r, c)] = assign
@@ -67,17 +69,18 @@ def place_candidates(rows: int, cols: int, min_dist: int, candidates: list[dict]
     return list(occupied.values()), unplaced
 
 def find_violations(rows: int, cols: int, min_dist: int, assigns: list[SeatAssign]) -> list[Violation]:
+    """Same adjacency caliber as placement. 8-neighborhood subsumes 4-neighborhood, so an
+    adjacent same-set pair yields exactly one 8-neigh entry — never a 4-neigh entry alongside."""
     viols: list[Violation] = []
-    by_pos = {(a.row, a.col): a for a in assigns}
     for i, a in enumerate(assigns):
         for b in assigns[i + 1:]:
             d = manhattan((a.row, a.col), (b.row, b.col))
             if d < min_dist:
                 viols.append(Violation("distance", a.candidate_id, b.candidate_id,
                                        f"曼哈顿距离 {d} < 最小要求 {min_dist}"))
-            if a.paper_id == b.paper_id and (b.row, b.col) in neighbors4(a.row, a.col, rows, cols):
-                viols.append(Violation("same_paper_adjacent", a.candidate_id, b.candidate_id,
-                                       f"同试卷套 {a.paper_id} 四邻相邻"))
+            if a.paper_id == b.paper_id and chebyshev((a.row, a.col), (b.row, b.col)) <= 1:
+                viols.append(Violation("same_paper_adjacent8", a.candidate_id, b.candidate_id,
+                                       f"同试卷套 {a.paper_id} 八邻相邻（含对角）"))
     return viols
 
 def plan_to_dict(assigns: list[SeatAssign], unplaced: list[dict], viols: list[Violation], rows: int, cols: int) -> dict:

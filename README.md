@@ -1,6 +1,6 @@
 # HallSpan 考场间距排座
 
-在考室网格上按最小曼哈顿距离排座，同试卷套不得四邻相邻，并输出违规与统计。
+在考室网格上按最小曼哈顿距离排座，同试卷套不得八邻相邻（含对角），并输出违规与统计。
 
 技术栈：Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL / Vue 3 / TypeScript / Vite
 
